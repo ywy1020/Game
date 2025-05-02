@@ -203,7 +203,6 @@ function joinRoom(roomCode, roomRef) {
     currentRoom = roomRef;
 
     // 加入玩家列表
-    const playersRef = currentRoom.get('players');
     const playerData = {
         id: playerState.id,
         nickname: playerState.nickname,
@@ -211,12 +210,22 @@ function joinRoom(roomCode, roomRef) {
         lastSeen: Date.now()
     };
 
-    playersRef.get(playerState.id).put(playerData, ack => {
+    currentRoom.get('players').get(playerState.id).put(playerData, ack => {
         if (ack.err) {
             showError('加入房間失敗，請重試！');
             return;
         }
+        
+        // 成功加入房間後立即更新玩家列表
         showWaitingRoom();
+        
+        // 設置定期更新在線狀態
+        setInterval(() => {
+            if (currentRoom && playerState.id) {
+                currentRoom.get('players').get(playerState.id).get('lastSeen').put(Date.now());
+                updatePlayerList(); // 每次更新在線狀態時也更新玩家列表
+            }
+        }, 3000);
     });
 }
 
@@ -225,6 +234,7 @@ function showWaitingRoom() {
     document.getElementById('homeScreen').classList.add('hidden');
     document.getElementById('joinRoomScreen').classList.add('hidden');
     document.getElementById('waitingScreen').classList.remove('hidden');
+    document.getElementById('gameScreen').classList.add('hidden');
     
     document.getElementById('roomCode').textContent = playerState.roomCode;
     
@@ -232,12 +242,30 @@ function showWaitingRoom() {
         document.getElementById('hostControls').classList.remove('hidden');
     }
 
-    // 監聽玩家列表變化
-    currentRoom.get('players').map().on((player, id) => {
-        if (player && Date.now() - player.lastSeen < 10000) {
-            updatePlayerList();
+    // 立即更新一次玩家列表
+    updatePlayerList();
+
+    // 設置定期更新
+    const updateInterval = setInterval(() => {
+        if (!currentRoom) {
+            clearInterval(updateInterval);
+            return;
         }
-    });
+        updatePlayerList();
+    }, 1000);
+
+    // 監聽玩家變化
+    if (currentRoom) {
+        currentRoom.get('players').map().on((data, key) => {
+            if (data === null) {
+                // 玩家離開時立即更新列表
+                updatePlayerList();
+            } else if (data && Date.now() - data.lastSeen < 10000) {
+                // 新玩家加入或現有玩家更新時
+                updatePlayerList();
+            }
+        });
+    }
 }
 
 // 更新玩家列表
@@ -245,43 +273,69 @@ function updatePlayerList() {
     const playerList = document.getElementById('playerList');
     playerList.innerHTML = '';
     
-    currentRoom.get('players').once((players) => {
-        if (!players) return;
-        
-        const activePlayers = Object.entries(players)
-            .filter(([_, player]) => player && Date.now() - player.lastSeen < 10000)
-            .map(([id, player]) => player);
+    if (!currentRoom) return;
 
-        document.getElementById('playerCount').textContent = activePlayers.length;
-        
-        activePlayers.forEach(player => {
-            const playerDiv = document.createElement('div');
-            playerDiv.className = 'player-item';
-            playerDiv.innerHTML = `
-                ${player.nickname}
-                ${player.isHost ? '<span class="host-badge">房主</span>' : ''}
-            `;
-            playerList.appendChild(playerDiv);
-        });
+    currentRoom.get('players').map().once((playerData, playerId) => {
+        if (!playerData) return;
+        if (Date.now() - playerData.lastSeen > 10000) return;
+
+        const playerDiv = document.createElement('div');
+        playerDiv.className = 'player-item';
+        playerDiv.innerHTML = `
+            ${playerData.nickname}
+            ${playerData.isHost ? '<span class="host-badge">房主</span>' : ''}
+        `;
+        playerList.appendChild(playerDiv);
     });
+
+    // 計算並更新玩家數量
+    updatePlayerCount();
+}
+
+// 計算活躍玩家數量
+function updatePlayerCount() {
+    if (!currentRoom) return;
+
+    let activeCount = 0;
+    currentRoom.get('players').map().once((playerData, playerId) => {
+        if (playerData && Date.now() - playerData.lastSeen < 10000) {
+            activeCount++;
+        }
+    });
+    
+    document.getElementById('playerCount').textContent = activeCount;
+
+    // 如果是房主，根據人數更新開始按鈕狀態
+    if (playerState.isHost) {
+        const startButton = document.getElementById('startGameBtn');
+        if (activeCount >= 2) {
+            startButton.disabled = false;
+            startButton.style.opacity = '1';
+        } else {
+            startButton.disabled = true;
+            startButton.style.opacity = '0.5';
+        }
+    }
 }
 
 // 開始遊戲按鈕
 document.getElementById('startGameBtn').addEventListener('click', () => {
     if (!playerState.isHost) return;
     
-    currentRoom.get('players').once((players) => {
-        const activePlayers = Object.entries(players)
-            .filter(([_, player]) => player && Date.now() - player.lastSeen < 10000);
-            
-        if (activePlayers.length < 2) {
-            alert('至少需要 2 名玩家才能開始遊戲！');
-            return;
+    let activeCount = 0;
+    currentRoom.get('players').map().once((playerData, playerId) => {
+        if (playerData && Date.now() - playerData.lastSeen < 10000) {
+            activeCount++;
         }
-
-        currentRoom.put({ status: 'playing' });
-        startGame();
     });
+    
+    if (activeCount < 2) {
+        alert('至少需要 2 名玩家才能開始遊戲！');
+        return;
+    }
+
+    currentRoom.get('status').put('playing');
+    startGame();
 });
 
 // 監聽房間狀態
