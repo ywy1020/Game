@@ -89,30 +89,72 @@ document.getElementById('confirmJoinBtn').addEventListener('click', () => {
         return;
     }
 
+    // 在加入房間前先顯示檢查中的狀態
+    const joinButton = document.getElementById('confirmJoinBtn');
+    const originalText = joinButton.textContent;
+    joinButton.disabled = true;
+    joinButton.textContent = '檢查房間中...';
+
     const roomRef = gun.get(`rooms/${roomCode}`);
+    let roomFound = false;
+    
+    // 設定超時檢查
+    const timeout = setTimeout(() => {
+        if (!roomFound) {
+            joinButton.disabled = false;
+            joinButton.textContent = originalText;
+            alert('無法連接到房間，請確認房間代碼是否正確，或是檢查網路連線！');
+        }
+    }, 5000);
+
     roomRef.once((room) => {
+        clearTimeout(timeout);
+        roomFound = true;
+        joinButton.disabled = false;
+        joinButton.textContent = originalText;
+
         if (!room) {
-            alert('找不到該房間！');
+            alert('找不到該房間！請確認房間代碼是否正確。');
             return;
         }
+
         if (room.status === 'playing') {
-            alert('遊戲已經開始！');
+            alert('遊戲已經開始！請等待下一局或是建立新房間。');
             return;
         }
 
-        playerState.roomCode = roomCode;
-        currentRoom = roomRef;
+        // 檢查房間是否已過期（超過30分鐘未使用）
+        const roomAge = Date.now() - room.createdAt;
+        if (roomAge > 30 * 60 * 1000) { // 30分鐘
+            alert('這個房間已經過期！請建立新房間。');
+            return;
+        }
 
-        // 加入玩家列表
-        const playersRef = roomRef.get('players');
-        playersRef.get(playerState.id).put({
-            id: playerState.id,
-            nickname: playerState.nickname,
-            isHost: false,
-            lastSeen: Date.now()
+        // 檢查房間人數
+        roomRef.get('players').once((players) => {
+            const activePlayers = Object.entries(players || {})
+                .filter(([_, player]) => player && Date.now() - player.lastSeen < 10000);
+            
+            if (activePlayers.length >= 8) {
+                alert('房間已滿！請加入其他房間或建立新房間。');
+                return;
+            }
+
+            // 所有檢查都通過，可以加入房間
+            playerState.roomCode = roomCode;
+            currentRoom = roomRef;
+
+            // 加入玩家列表
+            const playersRef = roomRef.get('players');
+            playersRef.get(playerState.id).put({
+                id: playerState.id,
+                nickname: playerState.nickname,
+                isHost: false,
+                lastSeen: Date.now()
+            });
+
+            showWaitingRoom();
         });
-
-        showWaitingRoom();
     });
 });
 
@@ -406,6 +448,25 @@ setInterval(() => {
         currentRoom.get('players').get(playerState.id).get('lastSeen').put(Date.now());
     }
 }, 3000);
+
+// 更新顯示錯誤訊息的函數
+function showError(message) {
+    // 找到或創建錯誤訊息容器
+    let errorContainer = document.getElementById('errorMessage');
+    if (!errorContainer) {
+        errorContainer = document.createElement('div');
+        errorContainer.id = 'errorMessage';
+        errorContainer.style.color = 'red';
+        errorContainer.style.marginTop = '10px';
+        document.querySelector('.room-input').appendChild(errorContainer);
+    }
+    errorContainer.textContent = message;
+    
+    // 3秒後自動清除錯誤訊息
+    setTimeout(() => {
+        errorContainer.textContent = '';
+    }, 3000);
+}
 
 // 啟動監聽
 listenToRoomStatus();
