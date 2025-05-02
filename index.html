@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>多人塗色對戰</title>
+    <link rel="stylesheet" href="styles.css">
+    <!-- GUN.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/gun/sea.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/gun/lib/webrtc.js"></script>
+</head>
+<body>
+    <div id="app">
+        <div id="homeScreen" class="screen">
+            <h1>多人塗色對戰</h1>
+            <div class="nickname-input">
+                <input type="text" id="nicknameInput" placeholder="請輸入暱稱" maxlength="10">
+            </div>
+            <div class="room-buttons">
+                <button id="createRoomBtn" class="btn">創建房間</button>
+                <button id="joinRoomBtn" class="btn">加入房間</button>
+            </div>
+        </div>
+
+        <div id="joinRoomScreen" class="screen hidden">
+            <h2>加入房間</h2>
+            <div class="room-input">
+                <input type="text" id="roomCodeInput" placeholder="請輸入房間代碼" maxlength="6">
+                <button id="confirmJoinBtn" class="btn">確認加入</button>
+            </div>
+            <button id="backToHomeBtn" class="btn secondary">返回</button>
+        </div>
+
+        <div id="waitingScreen" class="screen hidden">
+            <h2>等待遊戲開始</h2>
+            <div id="roomInfo">
+                <p>房間代碼：<span id="roomCode"></span></p>
+                <p>目前人數：<span id="playerCount">1</span></p>
+            </div>
+            <div id="playerList"></div>
+            <div id="hostControls" class="hidden">
+                <button id="startGameBtn" class="btn">開始遊戲</button>
+            </div>
+            <button id="leaveRoomBtn" class="btn secondary">離開房間</button>
+        </div>
+
+        <div id="gameScreen" class="screen hidden">
+            <div id="game-info">
+                <div id="team-info"></div>
+                <div id="timer"></div>
+            </div>
+            <canvas id="gameCanvas" width="800" height="600"></canvas>
+            <div id="score-board"></div>
+        </div>
+
+        <div id="resultScreen" class="screen hidden">
+            <h2>遊戲結束</h2>
+            <div id="teamRanking"></div>
+            <div id="mvpStats"></div>
+            <button id="restartButton" class="btn">再玩一次</button>
+            <button id="backToRoomBtn" class="btn secondary">返回房間</button>
+        </div>
+    </div>
+    <script src="app.js"></script>
+</body>
+</html>
