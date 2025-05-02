@@ -4,12 +4,45 @@ const CONFIG = {
     GAME_TIME: 60, // 遊戲時間（秒）
     PAINT_SIZE: 30, // 油漆基本大小
     SPLATTER_COUNT: 8, // 每次噴濺的油漆點數量
+    PEERS: [
+        'https://gun-manhattan.herokuapp.com/gun',
+        'https://gun-us.herokuapp.com/gun',
+        'https://gun-eu.herokuapp.com/gun'
+    ]
 };
 
-// 初始化 GUN.js
+// 初始化 GUN.js 並添加錯誤處理
 const gun = Gun({
-    peers: ['https://gun-manhattan.herokuapp.com/gun']
+    peers: CONFIG.PEERS,
+    localStorage: false,
+    radisk: false
 });
+
+// 添加 GUN.js 連線狀態監聽
+let isGunConnected = false;
+gun.on('hi', peer => {
+    console.log('Connected to peer:', peer);
+    isGunConnected = true;
+    showConnectionStatus('已連線到遊戲伺服器');
+});
+
+gun.on('bye', peer => {
+    console.log('Disconnected from peer:', peer);
+    showConnectionStatus('重新連線中...', 'warning');
+});
+
+// 顯示連線狀態
+function showConnectionStatus(message, type = 'info') {
+    let statusDiv = document.getElementById('connectionStatus');
+    if (!statusDiv) {
+        statusDiv = document.createElement('div');
+        statusDiv.id = 'connectionStatus';
+        document.body.insertBefore(statusDiv, document.body.firstChild);
+    }
+    
+    statusDiv.textContent = message;
+    statusDiv.className = `connection-status ${type}`;
+}
 
 // 玩家狀態
 const playerState = {
@@ -83,50 +116,67 @@ document.getElementById('joinRoomBtn').addEventListener('click', () => {
 
 // 確認加入房間
 document.getElementById('confirmJoinBtn').addEventListener('click', () => {
-    const roomCode = document.getElementById('roomCodeInput').value.trim().toUpperCase();
-    if (!roomCode) {
-        alert('請輸入房間代碼！');
+    if (!isGunConnected) {
+        showError('尚未連線到遊戲伺服器，請稍後再試！');
         return;
     }
 
-    // 在加入房間前先顯示檢查中的狀態
+    const roomCode = document.getElementById('roomCodeInput').value.trim().toUpperCase();
+    if (!roomCode) {
+        showError('請輸入房間代碼！');
+        return;
+    }
+
     const joinButton = document.getElementById('confirmJoinBtn');
     const originalText = joinButton.textContent;
     joinButton.disabled = true;
     joinButton.textContent = '檢查房間中...';
 
+    // 建立房間參考
     const roomRef = gun.get(`rooms/${roomCode}`);
+    let roomCheckTimeout;
     let roomFound = false;
-    
+
+    // 監聽房間資料
+    const roomSubscription = roomRef.on((room, key) => {
+        clearTimeout(roomCheckTimeout);
+        roomFound = true;
+
+        if (!room) {
+            showError('找不到該房間！請確認房間代碼是否正確。');
+            resetJoinButton();
+            return;
+        }
+
+        // 確認房間狀態
+        checkAndJoinRoom(room, roomRef);
+    });
+
     // 設定超時檢查
-    const timeout = setTimeout(() => {
+    roomCheckTimeout = setTimeout(() => {
         if (!roomFound) {
-            joinButton.disabled = false;
-            joinButton.textContent = originalText;
-            alert('無法連接到房間，請確認房間代碼是否正確，或是檢查網路連線！');
+            showError('連線超時！請確認網路連線後重試。');
+            resetJoinButton();
+            roomSubscription.off(); // 取消監聽
         }
     }, 5000);
 
-    roomRef.once((room) => {
-        clearTimeout(timeout);
-        roomFound = true;
+    function resetJoinButton() {
         joinButton.disabled = false;
         joinButton.textContent = originalText;
+    }
 
-        if (!room) {
-            alert('找不到該房間！請確認房間代碼是否正確。');
-            return;
-        }
-
+    function checkAndJoinRoom(room, roomRef) {
         if (room.status === 'playing') {
-            alert('遊戲已經開始！請等待下一局或是建立新房間。');
+            showError('遊戲已經開始！請等待下一局。');
+            resetJoinButton();
             return;
         }
 
-        // 檢查房間是否已過期（超過30分鐘未使用）
         const roomAge = Date.now() - room.createdAt;
-        if (roomAge > 30 * 60 * 1000) { // 30分鐘
-            alert('這個房間已經過期！請建立新房間。');
+        if (roomAge > 30 * 60 * 1000) {
+            showError('房間已過期！請建立新房間。');
+            resetJoinButton();
             return;
         }
 
@@ -134,29 +184,41 @@ document.getElementById('confirmJoinBtn').addEventListener('click', () => {
         roomRef.get('players').once((players) => {
             const activePlayers = Object.entries(players || {})
                 .filter(([_, player]) => player && Date.now() - player.lastSeen < 10000);
-            
+
             if (activePlayers.length >= 8) {
-                alert('房間已滿！請加入其他房間或建立新房間。');
+                showError('房間已滿！請加入其他房間。');
+                resetJoinButton();
                 return;
             }
 
-            // 所有檢查都通過，可以加入房間
-            playerState.roomCode = roomCode;
-            currentRoom = roomRef;
-
-            // 加入玩家列表
-            const playersRef = roomRef.get('players');
-            playersRef.get(playerState.id).put({
-                id: playerState.id,
-                nickname: playerState.nickname,
-                isHost: false,
-                lastSeen: Date.now()
-            });
-
-            showWaitingRoom();
+            // 加入房間
+            joinRoom(roomCode, roomRef);
         });
-    });
+    }
 });
+
+// 加入房間的具體實現
+function joinRoom(roomCode, roomRef) {
+    playerState.roomCode = roomCode;
+    currentRoom = roomRef;
+
+    // 加入玩家列表
+    const playersRef = currentRoom.get('players');
+    const playerData = {
+        id: playerState.id,
+        nickname: playerState.nickname,
+        isHost: false,
+        lastSeen: Date.now()
+    };
+
+    playersRef.get(playerState.id).put(playerData, ack => {
+        if (ack.err) {
+            showError('加入房間失敗，請重試！');
+            return;
+        }
+        showWaitingRoom();
+    });
+}
 
 // 顯示等待房間
 function showWaitingRoom() {
